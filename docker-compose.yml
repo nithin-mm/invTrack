@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: T3ch368b!
+      POSTGRES_DB: inventory_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  server:
+    build: ./server
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: "postgresql://inventory:T3ch368b!@db:5432/inventory_db?schema=public"
+    depends_on:
+      - db
+
+  client:
+    build: ./client
+    ports:
+      - "3333:3333"
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:
