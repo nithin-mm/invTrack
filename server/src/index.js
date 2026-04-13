@@ -246,7 +246,57 @@ app.post('/api/check-in', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Check-In (Bulk Upload) ---
+// --- Check-In (Bulk JSON from Mapping) ---
+app.post('/api/check-in/bulk', authenticateToken, async (req, res) => {
+  const { items } = req.body;
+  if (!items || !Array.isArray(items)) return res.status(400).json({ error: 'Invalid items array' });
+
+  try {
+    for (const row of items) {
+      const { name, quantity, partNumber, make, model, minQuantity, rackNumber, rackRowNumber, description } = row;
+      
+      const item = await prisma.item.upsert({
+        where: { partNumber: String(partNumber) },
+        update: { 
+          quantity: { increment: parseInt(quantity) },
+          name,
+          make,
+          model,
+          description,
+          rackNumber: rackNumber ? String(rackNumber) : undefined,
+          rackRowNumber: rackRowNumber ? String(rackRowNumber) : undefined,
+          minQuantity: parseInt(minQuantity) || 5
+        },
+        create: {
+          name,
+          quantity: parseInt(quantity),
+          partNumber: String(partNumber),
+          make,
+          model,
+          description,
+          rackNumber: rackNumber ? String(rackNumber) : undefined,
+          rackRowNumber: rackRowNumber ? String(rackRowNumber) : undefined,
+          minQuantity: parseInt(minQuantity) || 5
+        }
+      });
+
+      await prisma.transaction.create({
+        data: {
+          itemId: item.id,
+          userId: req.user.id,
+          type: 'CHECK_IN',
+          quantity: parseInt(quantity),
+          note: `Bulk Import (Mapped)`
+        }
+      });
+    }
+    res.json({ message: 'Bulk check-in successful', count: items.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Check-In (Bulk Upload Legacy) ---
 app.post('/api/upload', authenticateToken, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).send('No file uploaded.');
 
