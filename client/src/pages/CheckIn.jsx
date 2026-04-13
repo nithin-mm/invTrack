@@ -158,12 +158,16 @@ const CheckIn = () => {
             className="entry-options"
           >
             <button className="glass-card option-card" onClick={() => setStep(STEPS.MANUAL)}>
-              <Barcode size={48} className="icon orange" />
+              <div className="icon-wrapper orange">
+                <Barcode size={32} />
+              </div>
               <h3>Manual Entry</h3>
               <p>Scan barcode or enter details for a single item.</p>
             </button>
             <button className="glass-card option-card" onClick={() => setStep(STEPS.UPLOAD)}>
-              <FileSpreadsheet size={48} className="icon blue" />
+              <div className="icon-wrapper blue">
+                <FileSpreadsheet size={32} />
+              </div>
               <h3>Bulk Upload</h3>
               <p>Map and import data from Excel or CSV files.</p>
             </button>
@@ -363,7 +367,7 @@ const CheckIn = () => {
         .option-card { padding: 3rem; display: flex; flex-direction: column; align-items: center; text-align: center; border: 1px solid var(--glass-border); cursor: pointer; transition: all 0.3s; }
         .option-card:hover { transform: translateY(-8px); border-color: var(--primary); background: rgba(255, 255, 255, 0.05); }
         .option-card .icon { margin-bottom: 1.5rem; }
-        .option-card h3 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .option-card h3 { font-size: 1.5rem; margin-bottom: 0.5rem; color: var(--text-primary); }
         .option-card p { color: var(--text-secondary); font-size: 0.875rem; }
 
         .entry-view { width: 100%; }
@@ -415,6 +419,14 @@ const CheckIn = () => {
         .footer-actions { justify-content: space-between; align-items: center; }
         .stats-info { font-size: 0.875rem; color: var(--text-secondary); }
         .text-red { color: #ef4444; }
+
+        .btn-secondary { background: rgba(255, 255, 255, 0.05); border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 10px 20px; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); border-color: var(--primary); }
+
+        .icon-wrapper { width: 64px; height: 64px; border-radius: 16px; display: flex; align-items: center; justify-content: center; margin-bottom: 2rem; transition: all 0.3s; }
+        .icon-wrapper.orange { background: rgba(249, 115, 22, 0.1); color: #f97316; }
+        .icon-wrapper.blue { background: rgba(99, 102, 241, 0.1); color: #6366f1; }
+        .option-card:hover .icon-wrapper { transform: scale(1.1) rotate(5deg); }
 
         @keyframes slideUp {
           from { transform: translateY(20px); opacity: 0; }

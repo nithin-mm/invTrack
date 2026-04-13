@@ -13,11 +13,11 @@ import AuditLogs from './pages/AuditLogs';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
 
-const API_BASE_URL = `http://${window.location.hostname}:4000`;
+const API_BASE_URL = '/api';
 
 // --- Axios Interceptor ---
 axios.interceptors.request.use(config => {
-  if (config.url && config.url.startsWith('/api')) {
+  if (config.url && config.url.startsWith('/api') && API_BASE_URL !== '/api') {
     config.url = `${API_BASE_URL}${config.url}`;
   }
   const token = localStorage.getItem('token');

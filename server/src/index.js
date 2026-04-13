@@ -53,13 +53,13 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { username } });
     if (!user) {
-      console.log(`❌ Login failed: User "${username}" not found`);
+      console.log(`❌ Auth failure: User "${username}" not found in DB`);
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
-      console.log(`❌ Login failed: Invalid password for user "${username}"`);
+      console.log(`❌ Auth failure: Password mismatch for user "${username}"`);
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 

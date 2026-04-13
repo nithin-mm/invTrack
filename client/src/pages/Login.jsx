@@ -15,9 +15,9 @@ const Login = ({ onLogin, apiUrl }) => {
     setError(null);
     try {
       // Small check to see if server is even reachable
-      await axios.get(`${apiUrl}/api/health`, { timeout: 2000 });
+      await axios.get(`${apiUrl}/health`, { timeout: 2000 });
       
-      const res = await axios.post(`${apiUrl}/api/auth/login`, { username, password });
+      const res = await axios.post(`${apiUrl}/auth/login`, { username, password });
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
       onLogin(res.data.user);
