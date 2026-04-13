@@ -16,8 +16,9 @@ const CheckOut = () => {
 
   const fetchItems = async () => {
     try {
-      const res = await axios.get('/api/inventory');
-      setItems(res.data);
+      // Fetch a larger set for searching in the checkout view
+      const res = await axios.get('/api/inventory?limit=100');
+      setItems(res.data.items);
     } catch (err) {
       console.error(err);
     } finally {
