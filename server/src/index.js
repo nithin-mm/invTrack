@@ -44,7 +44,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Admin access required' });
+  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Permission denied. Admin access required.' });
   next();
 };
 
@@ -217,8 +217,8 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Check-In (Manual) ---
-app.post('/api/check-in', authenticateToken, async (req, res) => {
+// --- Check-In (Manual) - ADMIN ONLY ---
+app.post('/api/check-in', authenticateToken, isAdmin, async (req, res) => {
   const { name, quantity, partNumber, make, model, description, minQuantity, rackNumber, rackRowNumber } = req.body;
   try {
     const item = await prisma.item.upsert({
@@ -252,6 +252,8 @@ app.post('/api/check-in', authenticateToken, async (req, res) => {
         userId: req.user.id,
         type: 'CHECK_IN',
         quantity: parseInt(quantity),
+        itemName: item.name,
+        itemPartNumber: item.partNumber,
         note: `Manual Check-In`
       }
     });
@@ -263,8 +265,8 @@ app.post('/api/check-in', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Check-In (Bulk JSON from Mapping) ---
-app.post('/api/check-in/bulk', authenticateToken, async (req, res) => {
+// --- Check-In (Bulk JSON) - ADMIN ONLY ---
+app.post('/api/check-in/bulk', authenticateToken, isAdmin, async (req, res) => {
   const { items } = req.body;
   if (!items || !Array.isArray(items)) return res.status(400).json({ error: 'Invalid items array' });
 
@@ -276,21 +278,14 @@ app.post('/api/check-in/bulk', authenticateToken, async (req, res) => {
         where: { partNumber: String(partNumber) },
         update: { 
           quantity: { increment: parseInt(quantity) },
-          name,
-          make,
-          model,
-          description,
+          name, make, model, description,
           rackNumber: rackNumber ? String(rackNumber) : undefined,
           rackRowNumber: rackRowNumber ? String(rackRowNumber) : undefined,
           minQuantity: parseInt(minQuantity) || 5
         },
         create: {
-          name,
-          quantity: parseInt(quantity),
-          partNumber: String(partNumber),
-          make,
-          model,
-          description,
+          name, quantity: parseInt(quantity), partNumber: String(partNumber),
+          make, model, description,
           rackNumber: rackNumber ? String(rackNumber) : undefined,
           rackRowNumber: rackRowNumber ? String(rackRowNumber) : undefined,
           minQuantity: parseInt(minQuantity) || 5
@@ -303,6 +298,8 @@ app.post('/api/check-in/bulk', authenticateToken, async (req, res) => {
           userId: req.user.id,
           type: 'CHECK_IN',
           quantity: parseInt(quantity),
+          itemName: item.name,
+          itemPartNumber: item.partNumber,
           note: `Bulk Import (Mapped)`
         }
       });
@@ -314,74 +311,77 @@ app.post('/api/check-in/bulk', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Check-In (Bulk Upload Legacy) ---
-app.post('/api/upload', authenticateToken, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).send('No file uploaded.');
-
-  const results = [];
-  const filePath = req.file.path;
-
+// --- Edit Stock - ADMIN ONLY ---
+app.put('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, quantity, partNumber, make, model, description, minQuantity, rackNumber, rackRowNumber } = req.body;
   try {
-    if (req.file.originalname.endsWith('.csv')) {
-      fs.createReadStream(filePath)
-        .pipe(csv())
-        .on('data', (data) => results.push(data))
-        .on('end', () => processBulk(results, res, filePath, req.user.id));
-    } else {
-      const workbook = xlsx.readFile(filePath);
-      const sheetName = workbook.SheetNames[0];
-      const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-      processBulk(data, res, filePath, req.user.id);
-    }
+    const oldItem = await prisma.item.findUnique({ where: { id } });
+    if (!oldItem) return res.status(404).json({ error: 'Item not found' });
+
+    const item = await prisma.item.update({
+      where: { id },
+      data: {
+        name,
+        quantity: parseInt(quantity),
+        partNumber,
+        make,
+        model,
+        description,
+        rackNumber,
+        rackRowNumber,
+        minQuantity: parseInt(minQuantity)
+      }
+    });
+
+    await prisma.transaction.create({
+      data: {
+        itemId: item.id,
+        userId: req.user.id,
+        type: 'MANUAL_EDIT',
+        quantity: parseInt(quantity) - oldItem.quantity, // Relative change
+        itemName: item.name,
+        itemPartNumber: item.partNumber,
+        note: `Manual Correction: Name(${oldItem.name}->${item.name}), Qty(${oldItem.quantity}->${item.quantity})`
+      }
+    });
+
+    await cache.clearInventory();
+    res.json(item);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-async function processBulk(data, res, filePath, userId) {
+// --- Delete Stock - ADMIN ONLY ---
+app.delete('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { id } = req.params;
   try {
-    for (const row of data) {
-      const { name, quantity, partNumber, make, model, minQuantity, rackNumber, rackRowNumber } = row;
-      if (!name || !quantity) continue;
+    const item = await prisma.item.findUnique({ where: { id } });
+    if (!item) return res.status(404).json({ error: 'Item not found' });
 
-      const item = await prisma.item.upsert({
-        where: { partNumber: String(partNumber) },
-        update: { 
-          quantity: { increment: parseInt(quantity) },
-          rackNumber: rackNumber ? String(rackNumber) : undefined,
-          rackRowNumber: rackRowNumber ? String(rackRowNumber) : undefined
-        },
-        create: {
-          name,
-          quantity: parseInt(quantity),
-          partNumber: String(partNumber),
-          make,
-          model,
-          rackNumber: rackNumber ? String(rackNumber) : undefined,
-          rackRowNumber: rackRowNumber ? String(rackRowNumber) : undefined,
-          minQuantity: parseInt(minQuantity) || 5
-        }
-      });
+    // Record deletion in audit BEFORE deleting the item
+    await prisma.transaction.create({
+      data: {
+        itemId: null, // item is going away
+        userId: req.user.id,
+        type: 'MANUAL_DELETE',
+        quantity: -item.quantity,
+        itemName: item.name,
+        itemPartNumber: item.partNumber,
+        note: `Permanently deleted from inventory`
+      }
+    });
 
-      await prisma.transaction.create({
-        data: {
-          itemId: item.id,
-          userId,
-          type: 'CHECK_IN',
-          quantity: parseInt(quantity),
-          note: `Bulk Upload`
-        }
-      });
-    }
+    await prisma.item.delete({ where: { id } });
     await cache.clearInventory();
-    fs.unlinkSync(filePath);
-    res.json({ message: 'Bulk upload successful', count: data.length });
+    res.json({ message: 'Item deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-}
+});
 
-// --- Check-Out ---
+// --- Check-Out (USER/ADMIN ALLOWED) ---
 app.post('/api/check-out', authenticateToken, async (req, res) => {
   const { partNumber, quantity } = req.body;
   try {
@@ -400,6 +400,8 @@ app.post('/api/check-out', authenticateToken, async (req, res) => {
         userId: req.user.id,
         type: 'CHECK_OUT',
         quantity: parseInt(quantity),
+        itemName: item.name,
+        itemPartNumber: item.partNumber,
         note: `Manual Check-Out`
       }
     });

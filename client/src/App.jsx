@@ -73,9 +73,11 @@ function App() {
             <Link to="/inventory" className={location.pathname === '/inventory' ? 'active' : ''}>
               <List size={20} /> Stocks
             </Link>
-            <Link to="/check-in" className={location.pathname === '/check-in' ? 'active' : ''}>
-              <PlusCircle size={20} /> Check-In
-            </Link>
+            {user.role === 'ADMIN' && (
+              <Link to="/check-in" className={location.pathname === '/check-in' ? 'active' : ''}>
+                <PlusCircle size={20} /> Check-In
+              </Link>
+            )}
             <Link to="/check-out" className={location.pathname === '/check-out' ? 'active' : ''}>
               <MinusCircle size={20} /> Check-Out
             </Link>

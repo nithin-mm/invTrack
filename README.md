@@ -1,59 +1,84 @@
-# InvTrack - Modern Inventory Management System
+# InvTrack - Advanced Inventory Management System
 
-A full-stack, containerized inventory management system with secure authentication, warehouse location tracking, and bulk data import.
+InvTrack is a professional-grade, containerized inventory management platform built for speed, transparency, and ease of use. It features a modern Glassmorphism UI, a high-performance Redis caching layer, and a robust unified API gateway.
 
-## Features
-- **Secure Authentication**: JWT-based login system with role management.
-- **Modern Dashboard**: Real-time stats, inventory distribution charts, and low-stock alerts.
-- **Warehouse Location**: Track items specifically by **Rack Number** and **Rack Row**.
-- **Check-In**: 
-    - Manual entry with auto-focus barcode field.
-    - Bulk upload support for CSV and Excel files.
-- **Check-Out**: Search-and-select workflow with stock validation.
-- **Rich UI**: Built with React, Framer Motion for animations, and a Glassmorphism design system.
-- **Dockerized**: Easy deployment with Docker Compose.
+## 🌟 Key Features
 
-## Tech Stack
-- **Frontend**: React (Vite), Framer Motion, Lucide Icons, Recharts, Axios.
-- **Backend**: Node.js, Express, Prisma ORM, Bcrypt, JWT.
-- **Database**: PostgreSQL.
-- **Infrastructure**: Docker, Docker Compose, Nginx.
+### 📦 Optimized Stock Management
+- **Manual & Bulk Entry**: Check in items individually or via an intelligent bulk import wizard.
+- **Dynamic Field Mapping**: Upload any Excel/CSV file and map your own column headers (e.g., "Product Name" → "Name") in real-time.
+- **Advanced Editing**: Admins can manually correct item details, SKU numbers, and warehouse locations.
+- **Secure Deletion**: Remove items with confirmation while preserving their history in the audit trail.
 
-## Getting Started
+### 🛡️ Enterprise-Grade Security
+- **Role-Based Access Control (RBAC)**:
+    - **Admins**: Full control over inventory, user management, and bulk imports.
+    - **Users**: Restricted to stock viewing and Check-Out operations only.
+- **Unified Gateway (Nginx)**: Consolidates Frontend and API onto a single port (3333). Compatible with Cloudflare Tunnels and SSL out of the box.
+- **Persistent Audit Logs**: Transaction logs save permanent snapshots of item names and SKUs. History remains readable even if the source item is deleted.
+
+### ⚡ Performance & Analytics
+- **Redis Caching**: Sub-millisecond data fetching for inventory and dashboard stats.
+- **Modern Analytics**: Real-time visualization of stock distribution, low-stock alerts, and 45-day activity trends.
+- **Server-Side Pagination**: Handles thousands of items smoothly with optimized database queries.
+
+---
+
+## 🚀 Tech Stack
+- **Frontend**: React (Vite), Framer Motion, Lucide Icons, Recharts.
+- **Backend**: Node.js, Express, Prisma ORM, Ioredis.
+- **Database**: PostgreSQL (Primary Storage) & Redis (Caching Layer).
+- **Infra**: Docker, Nginx Reverse Proxy.
+
+---
+
+## 🛠️ Getting Started
 
 ### Prerequisites
-- Docker and Docker Compose installed on your machine.
+- Docker and Docker Compose installed.
 
 ### Installation & Launch
-1. Clone the repository or copy the files to your directory.
-2. Open a terminal in the project root.
-3. Run the following command:
+1. Clone the repository and navigate to the root directory.
+2. Run the deployment command:
    ```bash
    docker-compose up --build
    ```
-4. Access the UI at: [http://localhost:3333](http://localhost:3333)
-5. **Default Login**: 
-   - Username: `admin`
-   - Password: `admin`
+3. **Initialize the Database**:
+   ```bash
+   docker-compose exec server npx prisma db push
+   ```
+4. Access the system at: **[http://localhost:3333](http://localhost:3333)**
 
-## Emergency Admin Reset
-If you lose your admin password, you can reset it to the default (`admin`) by running this command on your Docker host:
+### Default Credentials
+- **Username**: `admin`
+- **Password**: `admin`
+
+---
+
+## 📂 Infrastructure Overview
+- **Port 3333**: Unified Access (Frontend + API via Nginx Proxy).
+- **Internal Only**: Redis (6379) and Backend (4000) are protected within the Docker network.
+- **Database**: PostgreSQL (Port 5433 exposed for maintenance).
+
+---
+
+## 🔧 Maintenance Commands
+
+**Emergency Admin Reset**:
 ```bash
-docker exec -it <server_container_id> node scripts/reset-admin.js
+docker-compose exec server node scripts/reset-admin.js
 ```
 
-## Bulk Upload Format
-When uploading via CSV or Excel, ensure your file has the following columns:
-- `name` (required)
-- `quantity` (required)
-- `partNumber` (unique identification)
-- `make`
-- `model`
-- `rackNumber`
-- `rackRowNumber`
-- `minQuantity` (threshold for low stock warning)
+**Clear Performance Cache**:
+If you need to manually clear the Redis cache:
+```bash
+docker-compose exec redis redis-cli flushall
+```
 
-## Infrastructure Details
-- **UI Port**: 3333 (Served via Nginx)
-- **API Port**: 4000
-- **Database Port**: 5433 (Exposed to Host) / 5432 (Internal)
+**Manual Database Sync**:
+```bash
+docker-compose exec server npx prisma db push
+```
+
+---
+*Developed for professional warehouse and inventory environments.*

@@ -25,15 +25,17 @@ model Item {
 }
 
 model Transaction {
-  id        String   @id @default(uuid())
-  itemId    String
-  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  userId    String?  // Optional for backward compatibility, but we will fill it going forward
-  user      User?    @relation(fields: [userId], references: [id])
-  type      String   // "CHECK_IN" or "CHECK_OUT"
-  quantity  Int
-  note      String?
-  createdAt DateTime @default(now())
+  id             String   @id @default(uuid())
+  itemId         String?
+  item           Item?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  type           String   // "CHECK_IN", "CHECK_OUT", "MANUAL_EDIT", "MANUAL_DELETE"
+  quantity       Int
+  itemName       String?  // Snapshot for audit persistence
+  itemPartNumber String?  // Snapshot for audit persistence
+  note           String?
+  createdAt      DateTime @default(now())
 }
 
 model User {

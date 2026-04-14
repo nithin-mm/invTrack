@@ -72,11 +72,11 @@ const AuditLogs = () => {
                       {log.type.replace('_', ' ')}
                     </span>
                   </td>
-                  <td className="font-medium">{log.item?.name}</td>
-                  <td className="text-secondary">{log.item?.partNumber}</td>
+                  <td className="font-medium">{log.itemName || log.item?.name || 'Deleted Item'}</td>
+                  <td className="text-secondary">{log.itemPartNumber || log.item?.partNumber || '-'}</td>
                   <td className="qty-cell">
-                    <span className={log.type === 'CHECK_IN' ? 'text-green' : 'text-orange'}>
-                      {log.type === 'CHECK_IN' ? '+' : '-'}{log.quantity}
+                    <span className={log.type === 'CHECK_IN' ? 'text-green' : log.type === 'CHECK_OUT' ? 'text-orange' : log.type === 'MANUAL_EDIT' ? 'text-blue' : 'text-red'}>
+                      {log.type === 'CHECK_IN' ? '+' : log.type === 'CHECK_OUT' ? '-' : log.type === 'MANUAL_EDIT' ? '~' : 'X'}{log.quantity}
                     </span>
                   </td>
                 </motion.tr>
