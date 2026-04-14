@@ -8,6 +8,7 @@ const csv = require('csv-parser');
 const xlsx = require('xlsx');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const cache = require('./redis');
 
 const prisma = new PrismaClient();
 const app = express();
@@ -126,25 +127,33 @@ app.post('/api/auth/users', authenticateToken, isAdmin, async (req, res) => {
   }
 });
 
-// --- Inventory Endpoints (with Pagination) ---
+// --- Inventory Endpoints (with Pagination & Caching) ---
 app.get('/api/inventory', authenticateToken, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 20;
   const skip = (page - 1) * limit;
+  const cacheKey = `inventory:page:${page}:limit:${limit}`;
 
   try {
+    const cached = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const totalItems = await prisma.item.count();
     const items = await prisma.item.findMany({
       orderBy: { updatedAt: 'desc' },
       skip,
       take: limit
     });
-    res.json({
+
+    const response = {
       items,
       totalItems,
       totalPages: Math.ceil(totalItems / limit),
       currentPage: page
-    });
+    };
+
+    await cache.set(cacheKey, response);
+    res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -172,9 +181,13 @@ app.get('/api/audit', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Dashboard Stats ---
+// --- Dashboard Stats (with Caching) ---
 app.get('/api/dashboard', authenticateToken, async (req, res) => {
+  const cacheKey = 'dashboard:stats';
   try {
+    const cached = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const totalItems = await prisma.item.count();
     const stockStats = await prisma.item.aggregate({
       _sum: { quantity: true }
@@ -189,13 +202,16 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
       _sum: { quantity: true }
     });
 
-    res.json({
+    const response = {
       totalItems,
       totalQuantity: stockStats._sum.quantity || 0,
       lowStockCount: lowStockItems.length,
       lowStockItems,
       itemsByMake
-    });
+    };
+
+    await cache.set(cacheKey, response);
+    res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -240,6 +256,7 @@ app.post('/api/check-in', authenticateToken, async (req, res) => {
       }
     });
 
+    await cache.clearInventory();
     res.json(item);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -290,6 +307,7 @@ app.post('/api/check-in/bulk', authenticateToken, async (req, res) => {
         }
       });
     }
+    await cache.clearInventory();
     res.json({ message: 'Bulk check-in successful', count: items.length });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -355,6 +373,7 @@ async function processBulk(data, res, filePath, userId) {
         }
       });
     }
+    await cache.clearInventory();
     fs.unlinkSync(filePath);
     res.json({ message: 'Bulk upload successful', count: data.length });
   } catch (error) {
@@ -385,6 +404,7 @@ app.post('/api/check-out', authenticateToken, async (req, res) => {
       }
     });
 
+    await cache.clearInventory();
     res.json(updatedItem);
   } catch (error) {
     res.status(500).json({ error: error.message });
