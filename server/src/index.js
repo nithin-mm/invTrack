@@ -34,7 +34,7 @@ const authenticateToken = (req, res, next) => {
   jwt.verify(token, JWT_SECRET, async (err, decoded) => {
     if (err) return res.status(403).json({ error: 'Invalid token' });
     
-    // Verify user still exists in DB (prevents staleness after db push)
+    // Verify user still exists in DB
     const user = await prisma.user.findUnique({ where: { id: decoded.id } });
     if (!user) return res.status(401).json({ error: 'User no longer exists. Please log in again.' });
     
@@ -81,6 +81,17 @@ app.post('/api/auth/reset-password', authenticateToken, async (req, res) => {
       where: { id: req.user.id },
       data: { password: hashedPassword }
     });
+
+    await prisma.transaction.create({
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        type: 'USER_PWD_RESET',
+        quantity: 0,
+        note: `User "${req.user.username}" reset their own password`
+      }
+    });
+
     res.json({ message: 'Password updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -103,11 +114,25 @@ app.post('/api/auth/users/:id/reset-password', authenticateToken, isAdmin, async
   const { id } = req.params;
   const { newPassword } = req.body;
   try {
+    const targetUser = await prisma.user.findUnique({ where: { id } });
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
       where: { id },
       data: { password: hashedPassword }
     });
+
+    await prisma.transaction.create({
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        type: 'USER_PWD_RESET',
+        quantity: 0,
+        note: `Admin reset password for user "${targetUser.username}"`
+      }
+    });
+
     res.json({ message: 'User password reset successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -121,13 +146,86 @@ app.post('/api/auth/users', authenticateToken, isAdmin, async (req, res) => {
     const user = await prisma.user.create({
       data: { username, password: hashedPassword, role: role || 'USER' }
     });
+
+    await prisma.transaction.create({
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        type: 'USER_CREATE',
+        quantity: 0,
+        note: `Created new user: "${username}" with role "${role || 'USER'}"`
+      }
+    });
+
     res.json({ message: 'User created', user: { username: user.username, role: user.role } });
   } catch (error) {
     res.status(400).json({ error: 'Username already exists' });
   }
 });
 
-// --- Inventory Endpoints (with Pagination & Caching) ---
+app.put('/api/auth/users/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { username, role } = req.body;
+  try {
+    const targetUser = await prisma.user.findUnique({ where: { id } });
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+    if (id === req.user.id && role !== targetUser.role) {
+      return res.status(403).json({ error: 'You cannot downgrade your own role.' });
+    }
+    if (targetUser.username === 'admin' && username !== 'admin') {
+      return res.status(403).json({ error: 'Cannot change username of default admin.' });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: { username, role }
+    });
+
+    await prisma.transaction.create({
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        type: 'USER_UPDATE',
+        quantity: 0,
+        note: `Updated user "${targetUser.username}": Username(${targetUser.username}->${username}), Role(${targetUser.role}->${role})`
+      }
+    });
+
+    res.json(updatedUser);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/auth/users/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const targetUser = await prisma.user.findUnique({ where: { id } });
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+    if (id === req.user.id) return res.status(403).json({ error: 'You cannot delete yourself.' });
+    if (targetUser.username === 'admin') return res.status(403).json({ error: 'Default admin cannot be deleted.' });
+
+    await prisma.user.delete({ where: { id } });
+
+    await prisma.transaction.create({
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        type: 'USER_DELETE',
+        quantity: 0,
+        note: `Permanently deleted user: "${targetUser.username}"`
+      }
+    });
+
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Inventory Endpoints ---
 app.get('/api/inventory', authenticateToken, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 20;
@@ -159,29 +257,60 @@ app.get('/api/inventory', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Audit Logs (Last 45 Days) ---
+// --- Audit Logs (Fixed to 180 Days + Search + Pagination + Redis) ---
 app.get('/api/audit', authenticateToken, async (req, res) => {
-  const fortyFiveDaysAgo = new Date();
-  fortyFiveDaysAgo.setDate(fortyFiveDaysAgo.getDate() - 45);
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 100;
+  const search = req.query.search || '';
+  const skip = (page - 1) * limit;
+  const cacheKey = `audit:page:${page}:limit:${limit}:search:${search}`;
+
+  const hundredEightyDaysAgo = new Date();
+  hundredEightyDaysAgo.setDate(hundredEightyDaysAgo.getDate() - 180);
 
   try {
+    const cached = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
+    const where = {
+      createdAt: { gte: hundredEightyDaysAgo },
+      OR: search ? [
+        { itemName: { contains: search, mode: 'insensitive' } },
+        { itemPartNumber: { contains: search, mode: 'insensitive' } },
+        { username: { contains: search, mode: 'insensitive' } },
+        { note: { contains: search, mode: 'insensitive' } },
+        { type: { contains: search, mode: 'insensitive' } }
+      ] : undefined
+    };
+
+    const totalLogs = await prisma.transaction.count({ where });
     const logs = await prisma.transaction.findMany({
-      where: {
-        createdAt: { gte: fortyFiveDaysAgo }
-      },
+      where,
       include: {
         item: { select: { name: true, partNumber: true } },
         user: { select: { username: true } }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit
     });
-    res.json(logs);
+
+    const response = {
+      logs,
+      totalLogs,
+      totalPages: Math.ceil(totalLogs / limit),
+      currentPage: page
+    };
+
+    // Cache audit results for 5 minutes (300 seconds)
+    await cache.set(cacheKey, response, 300);
+    res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// --- Dashboard Stats (with Caching) ---
+// --- Dashboard Stats ---
 app.get('/api/dashboard', authenticateToken, async (req, res) => {
   const cacheKey = 'dashboard:stats';
   try {
@@ -189,13 +318,9 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
     if (cached) return res.json(cached);
 
     const totalItems = await prisma.item.count();
-    const stockStats = await prisma.item.aggregate({
-      _sum: { quantity: true }
-    });
-    
+    const stockStats = await prisma.item.aggregate({ _sum: { quantity: true } });
     const items = await prisma.item.findMany();
     const lowStockItems = items.filter(item => item.quantity <= item.minQuantity);
-
     const itemsByMake = await prisma.item.groupBy({
       by: ['make'],
       _count: { _all: true },
@@ -217,7 +342,7 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Check-In (Manual) - ADMIN ONLY ---
+// --- Check-In ---
 app.post('/api/check-in', authenticateToken, isAdmin, async (req, res) => {
   const { name, quantity, partNumber, make, model, description, minQuantity, rackNumber, rackRowNumber } = req.body;
   try {
@@ -225,24 +350,12 @@ app.post('/api/check-in', authenticateToken, isAdmin, async (req, res) => {
       where: { partNumber: partNumber || 'TEMP-' + Date.now() },
       update: {
         quantity: { increment: parseInt(quantity) },
-        name,
-        make,
-        model,
-        description,
-        rackNumber,
-        rackRowNumber,
+        name, make, model, description, rackNumber, rackRowNumber,
         minQuantity: parseInt(minQuantity) || 5
       },
       create: {
-        name,
-        quantity: parseInt(quantity),
-        partNumber,
-        make,
-        model,
-        description,
-        rackNumber,
-        rackRowNumber,
-        minQuantity: parseInt(minQuantity) || 5
+        name, quantity: parseInt(quantity), partNumber, make, model, description,
+        rackNumber, rackRowNumber, minQuantity: parseInt(minQuantity) || 5
       }
     });
 
@@ -250,6 +363,7 @@ app.post('/api/check-in', authenticateToken, isAdmin, async (req, res) => {
       data: {
         itemId: item.id,
         userId: req.user.id,
+        username: req.user.username,
         type: 'CHECK_IN',
         quantity: parseInt(quantity),
         itemName: item.name,
@@ -265,7 +379,6 @@ app.post('/api/check-in', authenticateToken, isAdmin, async (req, res) => {
   }
 });
 
-// --- Check-In (Bulk JSON) - ADMIN ONLY ---
 app.post('/api/check-in/bulk', authenticateToken, isAdmin, async (req, res) => {
   const { items } = req.body;
   if (!items || !Array.isArray(items)) return res.status(400).json({ error: 'Invalid items array' });
@@ -273,21 +386,16 @@ app.post('/api/check-in/bulk', authenticateToken, isAdmin, async (req, res) => {
   try {
     for (const row of items) {
       const { name, quantity, partNumber, make, model, minQuantity, rackNumber, rackRowNumber, description } = row;
-      
       const item = await prisma.item.upsert({
         where: { partNumber: String(partNumber) },
         update: { 
           quantity: { increment: parseInt(quantity) },
-          name, make, model, description,
-          rackNumber: rackNumber ? String(rackNumber) : undefined,
-          rackRowNumber: rackRowNumber ? String(rackRowNumber) : undefined,
+          name, make, model, description, rackNumber, rackRowNumber,
           minQuantity: parseInt(minQuantity) || 5
         },
         create: {
           name, quantity: parseInt(quantity), partNumber: String(partNumber),
-          make, model, description,
-          rackNumber: rackNumber ? String(rackNumber) : undefined,
-          rackRowNumber: rackRowNumber ? String(rackRowNumber) : undefined,
+          make, model, description, rackNumber, rackRowNumber,
           minQuantity: parseInt(minQuantity) || 5
         }
       });
@@ -296,6 +404,7 @@ app.post('/api/check-in/bulk', authenticateToken, isAdmin, async (req, res) => {
         data: {
           itemId: item.id,
           userId: req.user.id,
+          username: req.user.username,
           type: 'CHECK_IN',
           quantity: parseInt(quantity),
           itemName: item.name,
@@ -311,7 +420,7 @@ app.post('/api/check-in/bulk', authenticateToken, isAdmin, async (req, res) => {
   }
 });
 
-// --- Edit Stock - ADMIN ONLY ---
+// --- Edit Stock ---
 app.put('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) => {
   const { id } = req.params;
   const { name, quantity, partNumber, make, model, description, minQuantity, rackNumber, rackRowNumber } = req.body;
@@ -321,25 +430,16 @@ app.put('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) => {
 
     const item = await prisma.item.update({
       where: { id },
-      data: {
-        name,
-        quantity: parseInt(quantity),
-        partNumber,
-        make,
-        model,
-        description,
-        rackNumber,
-        rackRowNumber,
-        minQuantity: parseInt(minQuantity)
-      }
+      data: { name, quantity: parseInt(quantity), partNumber, make, model, description, rackNumber, rackRowNumber, minQuantity: parseInt(minQuantity) }
     });
 
     await prisma.transaction.create({
       data: {
         itemId: item.id,
         userId: req.user.id,
+        username: req.user.username,
         type: 'MANUAL_EDIT',
-        quantity: parseInt(quantity) - oldItem.quantity, // Relative change
+        quantity: parseInt(quantity) - oldItem.quantity,
         itemName: item.name,
         itemPartNumber: item.partNumber,
         note: `Manual Correction: Name(${oldItem.name}->${item.name}), Qty(${oldItem.quantity}->${item.quantity})`
@@ -353,18 +453,18 @@ app.put('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) => {
   }
 });
 
-// --- Delete Stock - ADMIN ONLY ---
+// --- Delete Stock ---
 app.delete('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) => {
   const { id } = req.params;
   try {
     const item = await prisma.item.findUnique({ where: { id } });
     if (!item) return res.status(404).json({ error: 'Item not found' });
 
-    // Record deletion in audit BEFORE deleting the item
     await prisma.transaction.create({
       data: {
-        itemId: null, // item is going away
+        itemId: null,
         userId: req.user.id,
+        username: req.user.username,
         type: 'MANUAL_DELETE',
         quantity: -item.quantity,
         itemName: item.name,
@@ -381,7 +481,7 @@ app.delete('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) =>
   }
 });
 
-// --- Check-Out (USER/ADMIN ALLOWED) ---
+// --- Check-Out ---
 app.post('/api/check-out', authenticateToken, async (req, res) => {
   const { partNumber, quantity } = req.body;
   try {
@@ -398,6 +498,7 @@ app.post('/api/check-out', authenticateToken, async (req, res) => {
       data: {
         itemId: item.id,
         userId: req.user.id,
+        username: req.user.username,
         type: 'CHECK_OUT',
         quantity: parseInt(quantity),
         itemName: item.name,
@@ -426,8 +527,6 @@ app.listen(PORT, '0.0.0.0', async () => {
         data: { username: 'admin', password: hashedPassword, role: 'ADMIN' }
       });
       console.log('🌟 Admin user initialized automatically (admin/admin)');
-    } else {
-      console.log('✅ Admin user already exists.');
     }
   } catch (err) {
     console.error('🛑 Database initialization error:', err.message);

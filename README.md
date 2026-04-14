@@ -1,38 +1,32 @@
-# InvTrack - Advanced Inventory Management System
+# InvTrack - High-Performance Inventory Management
 
-InvTrack is a professional-grade, containerized inventory management platform built for speed, transparency, and ease of use. It features a modern Glassmorphism UI, a high-performance Redis caching layer, and a robust unified API gateway.
+InvTrack is a professional-grade, containerized inventory management platform optimized for speed, security, and long-term accountability. It combines a modern Glassmorphism UI with a high-performance Redis caching layer and an advanced auditing engine.
 
 ## 🌟 Key Features
 
-### 📦 Optimized Stock Management
-- **Manual & Bulk Entry**: Check in items individually or via an intelligent bulk import wizard.
-- **Dynamic Field Mapping**: Upload any Excel/CSV file and map your own column headers (e.g., "Product Name" → "Name") in real-time.
-- **Advanced Editing**: Admins can manually correct item details, SKU numbers, and warehouse locations.
-- **Secure Deletion**: Remove items with confirmation while preserving their history in the audit trail.
+### 📦 Precision Stock Control
+- **Intelligent Check-In**: Manual entry or a dynamic bulk-mapping wizard that adapts to any Excel/CSV layout.
+- **Advanced Stock Editing**: Correct stock details, adjust quantities, and relocate items across racks instantly.
+- **Admin-Only Management**: Powerful administrative tools for stock corrections and deletion, secured by role-based access.
 
-### 🛡️ Enterprise-Grade Security
-- **Role-Based Access Control (RBAC)**:
-    - **Admins**: Full control over inventory, user management, and bulk imports.
-    - **Users**: Restricted to stock viewing and Check-Out operations only.
-- **Unified Gateway (Nginx)**: Consolidates Frontend and API onto a single port (3333). Compatible with Cloudflare Tunnels and SSL out of the box.
-- **Persistent Audit Logs**: Transaction logs save permanent snapshots of item names and SKUs. History remains readable even if the source item is deleted.
+### 🛡️ Unified Account & Security
+- **Anti-Lockout Protection**: System-level safeguards prevent Admins from deleting themselves or downgrading their own access.
+- **Protected Master Admin**: The default `admin` account is protected from deletion or renaming for guaranteed system recovery.
+- **Simplified User Profile**: Users can safely manage their own passwords without seeing complex administrative tools.
 
-### ⚡ Performance & Analytics
-- **Redis Caching**: Sub-millisecond data fetching for inventory and dashboard stats.
-- **Modern Analytics**: Real-time visualization of stock distribution, low-stock alerts, and 45-day activity trends.
-- **Server-Side Pagination**: Handles thousands of items smoothly with optimized database queries.
+### 🕵️ High-Performance Audit Engine
+- **Searchable History**: A global search bar allows you to filter logs by Item, SKU, Username, or Transaction Notes.
+- **180-Day Retention**: Tracks system activity for 6 months with sub-millisecond page turns powered by **Redis Caching**.
+- **Indestructible Logs**: Uses "Snapshot Persistence" for both Items and Users. Your logs remain 100% readable even if the source item or user account is permanently deleted.
 
----
-
-## 🚀 Tech Stack
-- **Frontend**: React (Vite), Framer Motion, Lucide Icons, Recharts.
-- **Backend**: Node.js, Express, Prisma ORM, Ioredis.
-- **Database**: PostgreSQL (Primary Storage) & Redis (Caching Layer).
-- **Infra**: Docker, Nginx Reverse Proxy.
+### ⚡ Technical Excellence
+- **Unified Gateway (Nginx)**: Consolidates Frontend and API onto a single port (3333). Compatible with Cloudflare Tunnels and SSL.
+- **Redis Acceleration**: Cache-aside patterns for sub-millisecond dashboard stats, inventory views, and audit searches.
+- **Dockerized Architecture**: Deploy the entire stack (Postgres, Redis, Backend, Frontend) with one command.
 
 ---
 
-## 🛠️ Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 - Docker and Docker Compose installed.
@@ -43,7 +37,7 @@ InvTrack is a professional-grade, containerized inventory management platform bu
    ```bash
    docker-compose up --build
    ```
-3. **Initialize the Database**:
+3. **Synchronize the Database**:
    ```bash
    docker-compose exec server npx prisma db push
    ```
@@ -55,13 +49,6 @@ InvTrack is a professional-grade, containerized inventory management platform bu
 
 ---
 
-## 📂 Infrastructure Overview
-- **Port 3333**: Unified Access (Frontend + API via Nginx Proxy).
-- **Internal Only**: Redis (6379) and Backend (4000) are protected within the Docker network.
-- **Database**: PostgreSQL (Port 5433 exposed for maintenance).
-
----
-
 ## 🔧 Maintenance Commands
 
 **Emergency Admin Reset**:
@@ -70,7 +57,6 @@ docker-compose exec server node scripts/reset-admin.js
 ```
 
 **Clear Performance Cache**:
-If you need to manually clear the Redis cache:
 ```bash
 docker-compose exec redis redis-cli flushall
 ```
@@ -81,4 +67,4 @@ docker-compose exec server npx prisma db push
 ```
 
 ---
-*Developed for professional warehouse and inventory environments.*
+*Developed for professional high-volume warehouse environments.*
