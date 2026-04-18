@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { ChevronLeft, ChevronRight, Package, Search, Filter, Edit3, Trash2, X, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Package, Search, Filter, Edit3, Trash2, X, AlertTriangle, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const InventoryList = () => {
@@ -18,9 +18,13 @@ const InventoryList = () => {
   const [editingItem, setEditingItem] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [submitLoading, setSubmitLoading] = useState(false);
+  const [customCols, setCustomCols] = useState([]);
+  const [error, setError] = useState(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   useEffect(() => {
     fetchItems();
+    fetchCustomCols();
   }, [page]);
 
   const fetchItems = async () => {
@@ -29,10 +33,21 @@ const InventoryList = () => {
       const res = await axios.get(`/api/inventory?page=${page}&limit=20`);
       setItems(res.data.items);
       setTotalPages(res.data.totalPages);
+      setError(null);
     } catch (err) {
       console.error(err);
+      setError(err.response?.data?.error || 'Failed to fetch inventory');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCustomCols = async () => {
+    try {
+      const res = await axios.get('/api/custom-columns');
+      setCustomCols(res.data);
+    } catch (err) {
+      console.error('Failed to fetch custom columns');
     }
   };
 
@@ -63,6 +78,56 @@ const InventoryList = () => {
     }
   };
 
+  const handleExport = async () => {
+    setExportLoading(true);
+    try {
+      const res = await axios.get('/api/inventory/export');
+      const allItems = res.data;
+      
+      // Define Headers
+      const headers = [
+        'Item Name', 'SKU/Part Number', 'Make', 'Model', 
+        'Quantity', 'Min Quantity', 'Rack Number', 'Rack Row', 
+        ...customCols.map(c => c.name)
+      ];
+
+      // Map Data
+      const rows = allItems.map(item => [
+        item.name,
+        item.partNumber || '-',
+        item.make || '-',
+        item.model || '-',
+        item.quantity,
+        item.minQuantity,
+        item.rackNumber || '-',
+        item.rackRowNumber || '-',
+        ...customCols.map(c => item.customData?.[c.name] || '-')
+      ]);
+
+      // Create CSV String
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+
+      // Trigger Download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `Inventory_Export_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Export failed', err);
+      alert('Export failed. Please try again.');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   const filteredItems = items.filter(item => 
     item.name.toLowerCase().includes(search.toLowerCase()) || 
     (item.partNumber && item.partNumber.toLowerCase().includes(search.toLowerCase()))
@@ -84,6 +149,12 @@ const InventoryList = () => {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        {isAdmin && (
+          <button className="export-btn" onClick={handleExport} disabled={exportLoading}>
+            <Download size={18} />
+            {exportLoading ? 'Exporting...' : 'Export CSV'}
+          </button>
+        )}
       </div>
 
       <div className="glass-card table-wrapper">
@@ -97,13 +168,28 @@ const InventoryList = () => {
               <th>Location (Rack-Row)</th>
               <th>Quantity</th>
               <th>Status</th>
+              {customCols.map(col => (
+                <th key={col.id}>{col.name}</th>
+              ))}
               {isAdmin && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
             <AnimatePresence mode="popLayout">
-              {loading ? (
-                <tr><td colSpan={isAdmin ? 8 : 7} className="text-center">Loading inventory...</td></tr>
+              {error ? (
+                <tr>
+                  <td colSpan={isAdmin ? (8 + customCols.length) : (7 + customCols.length)} className="text-center p-4">
+                    <div className="error-alert-box">
+                      <AlertTriangle size={24} className="text-red" />
+                      <p>{error}</p>
+                      <button className="retry-btn" onClick={fetchItems}>Try Again</button>
+                    </div>
+                  </td>
+                </tr>
+              ) : loading ? (
+                <tr><td colSpan={isAdmin ? (8 + customCols.length) : (7 + customCols.length)} className="text-center">Loading inventory...</td></tr>
+              ) : filteredItems.length === 0 ? (
+                <tr><td colSpan={isAdmin ? (8 + customCols.length) : (7 + customCols.length)} className="text-center">No items found matching your search.</td></tr>
               ) : filteredItems.map((item) => (
                 <motion.tr 
                   key={item.id}
@@ -126,6 +212,11 @@ const InventoryList = () => {
                       {item.quantity <= item.minQuantity ? 'Low Stock' : 'Healthy'}
                     </span>
                   </td>
+                  {customCols.map(col => (
+                    <td key={col.id} className="text-secondary">
+                      {item.customData?.[col.name] || '-'}
+                    </td>
+                  ))}
                   {isAdmin && (
                     <td>
                       <div className="action-btns">
@@ -210,6 +301,26 @@ const InventoryList = () => {
                      <input className="input-field" value={editingItem.rackRowNumber} onChange={e => setEditingItem({...editingItem, rackRowNumber: e.target.value})} />
                    </div>
                 </div>
+                {customCols.length > 0 && (
+                  <div className="custom-fields-section">
+                    <h4 className="section-title">Custom Fields</h4>
+                    <div className="form-row">
+                      {customCols.map(col => (
+                        <div className="form-group" key={col.id}>
+                          <label>{col.name}</label>
+                          <input 
+                            className="input-field" 
+                            value={editingItem.customData?.[col.name] || ''} 
+                            onChange={e => setEditingItem({
+                              ...editingItem, 
+                              customData: { ...editingItem.customData, [col.name]: e.target.value }
+                            })} 
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="modal-actions">
                   <button type="button" className="p-btn" onClick={() => setEditingItem(null)}>Cancel</button>
                   <button type="submit" className="p-btn primary" disabled={submitLoading}>
@@ -294,6 +405,16 @@ const InventoryList = () => {
         .delete-alert { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
         .text-red { color: #ef4444; }
         .delete-confirm { background: #ef4444; border: none; font-weight: 600; }
+        
+        .custom-fields-section { margin-top: 1rem; border-top: 1px solid var(--glass-border); pt: 1rem; }
+        .section-title { font-size: 0.8rem; font-weight: 700; color: var(--primary); margin-bottom: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        .error-alert-box { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 2rem; background: rgba(239, 68, 68, 0.05); border-radius: 12px; border: 1px dashed rgba(239, 68, 68, 0.3); }
+        .retry-btn { margin-top: 0.5rem; background: var(--primary); border: none; color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+
+        .export-btn { display: flex; align-items: center; gap: 8px; background: rgba(99, 102, 241, 0.1); color: #6366f1; border: 1px solid rgba(99, 102, 241, 0.2); padding: 10px 18px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        .export-btn:hover:not(:disabled) { background: rgba(99, 102, 241, 0.2); border-color: #6366f1; transform: translateY(-2px); }
+        .export-btn:disabled { opacity: 0.5; cursor: not-allowed; }
       `}} />
     </div>
   );

@@ -257,6 +257,108 @@ app.get('/api/inventory', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/inventory/export', authenticateToken, async (req, res) => {
+  try {
+    const items = await prisma.item.findMany({
+      orderBy: { updatedAt: 'desc' }
+    });
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Custom Columns Endpoints ---
+app.get('/api/custom-columns', authenticateToken, async (req, res) => {
+  try {
+    const columns = await prisma.customColumn.findMany({
+      orderBy: { createdAt: 'asc' }
+    });
+    
+    // Non-admins only see "ALL" visibility columns
+    if (req.user.role !== 'ADMIN') {
+      return res.json(columns.filter(c => c.visibility === 'ALL'));
+    }
+    
+    res.json(columns);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/custom-columns', authenticateToken, isAdmin, async (req, res) => {
+  const { name, visibility } = req.body;
+  try {
+    const column = await prisma.customColumn.create({
+      data: { name, visibility: visibility || 'ALL' }
+    });
+
+    await prisma.transaction.create({
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        type: 'COL_CREATE',
+        quantity: 0,
+        note: `Created custom column: "${name}" with visibility "${visibility || 'ALL'}"`
+      }
+    });
+
+    res.json(column);
+  } catch (error) {
+    res.status(400).json({ error: 'Column name already exists' });
+  }
+});
+
+app.put('/api/custom-columns/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, visibility } = req.body;
+  try {
+    const oldColumn = await prisma.customColumn.findUnique({ where: { id } });
+    const column = await prisma.customColumn.update({
+      where: { id },
+      data: { name, visibility }
+    });
+
+    await prisma.transaction.create({
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        type: 'COL_UPDATE',
+        quantity: 0,
+        note: `Updated custom column "${oldColumn.name}": Name(${oldColumn.name}->${name}), Visibility(${oldColumn.visibility}->${visibility})`
+      }
+    });
+
+    res.json(column);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/custom-columns/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const column = await prisma.customColumn.findUnique({ where: { id } });
+    if (!column) return res.status(404).json({ error: 'Column not found' });
+
+    await prisma.customColumn.delete({ where: { id } });
+
+    await prisma.transaction.create({
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        type: 'COL_DELETE',
+        quantity: 0,
+        note: `Deleted custom column: "${column.name}"`
+      }
+    });
+
+    res.json({ message: 'Column deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- Audit Logs (Fixed to 180 Days + Search + Pagination + Redis) ---
 app.get('/api/audit', authenticateToken, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -344,18 +446,20 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
 
 // --- Check-In ---
 app.post('/api/check-in', authenticateToken, isAdmin, async (req, res) => {
-  const { name, quantity, partNumber, make, model, description, minQuantity, rackNumber, rackRowNumber } = req.body;
+  const { name, quantity, partNumber, make, model, description, minQuantity, rackNumber, rackRowNumber, customData } = req.body;
   try {
     const item = await prisma.item.upsert({
       where: { partNumber: partNumber || 'TEMP-' + Date.now() },
       update: {
         quantity: { increment: parseInt(quantity) },
         name, make, model, description, rackNumber, rackRowNumber,
-        minQuantity: parseInt(minQuantity) || 5
+        minQuantity: parseInt(minQuantity) || 5,
+        customData: customData || {}
       },
       create: {
         name, quantity: parseInt(quantity), partNumber, make, model, description,
-        rackNumber, rackRowNumber, minQuantity: parseInt(minQuantity) || 5
+        rackNumber, rackRowNumber, minQuantity: parseInt(minQuantity) || 5,
+        customData: customData || {}
       }
     });
 
@@ -368,7 +472,8 @@ app.post('/api/check-in', authenticateToken, isAdmin, async (req, res) => {
         quantity: parseInt(quantity),
         itemName: item.name,
         itemPartNumber: item.partNumber,
-        note: `Manual Check-In`
+        note: `Manual Check-In`,
+        customData: customData || {}
       }
     });
 
@@ -385,18 +490,20 @@ app.post('/api/check-in/bulk', authenticateToken, isAdmin, async (req, res) => {
 
   try {
     for (const row of items) {
-      const { name, quantity, partNumber, make, model, minQuantity, rackNumber, rackRowNumber, description } = row;
+      const { name, quantity, partNumber, make, model, minQuantity, rackNumber, rackRowNumber, description, customData } = row;
       const item = await prisma.item.upsert({
         where: { partNumber: String(partNumber) },
         update: { 
           quantity: { increment: parseInt(quantity) },
           name, make, model, description, rackNumber, rackRowNumber,
-          minQuantity: parseInt(minQuantity) || 5
+          minQuantity: parseInt(minQuantity) || 5,
+          customData: customData || {}
         },
         create: {
           name, quantity: parseInt(quantity), partNumber: String(partNumber),
           make, model, description, rackNumber, rackRowNumber,
-          minQuantity: parseInt(minQuantity) || 5
+          minQuantity: parseInt(minQuantity) || 5,
+          customData: customData || {}
         }
       });
 
@@ -409,7 +516,8 @@ app.post('/api/check-in/bulk', authenticateToken, isAdmin, async (req, res) => {
           quantity: parseInt(quantity),
           itemName: item.name,
           itemPartNumber: item.partNumber,
-          note: `Bulk Import (Mapped)`
+          note: `Bulk Import (Mapped)`,
+          customData: customData || {}
         }
       });
     }
@@ -423,14 +531,18 @@ app.post('/api/check-in/bulk', authenticateToken, isAdmin, async (req, res) => {
 // --- Edit Stock ---
 app.put('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) => {
   const { id } = req.params;
-  const { name, quantity, partNumber, make, model, description, minQuantity, rackNumber, rackRowNumber } = req.body;
+  const { name, quantity, partNumber, make, model, description, minQuantity, rackNumber, rackRowNumber, customData } = req.body;
   try {
     const oldItem = await prisma.item.findUnique({ where: { id } });
     if (!oldItem) return res.status(404).json({ error: 'Item not found' });
 
     const item = await prisma.item.update({
       where: { id },
-      data: { name, quantity: parseInt(quantity), partNumber, make, model, description, rackNumber, rackRowNumber, minQuantity: parseInt(minQuantity) }
+      data: { 
+        name, quantity: parseInt(quantity), partNumber, make, model, description, rackNumber, rackRowNumber, 
+        minQuantity: parseInt(minQuantity),
+        customData: customData || {}
+      }
     });
 
     await prisma.transaction.create({
@@ -442,7 +554,8 @@ app.put('/api/inventory/:id', authenticateToken, isAdmin, async (req, res) => {
         quantity: parseInt(quantity) - oldItem.quantity,
         itemName: item.name,
         itemPartNumber: item.partNumber,
-        note: `Manual Correction: Name(${oldItem.name}->${item.name}), Qty(${oldItem.quantity}->${item.quantity})`
+        note: `Manual Correction: Name(${oldItem.name}->${item.name}), Qty(${oldItem.quantity}->${item.quantity})`,
+        customData: customData || {}
       }
     });
 

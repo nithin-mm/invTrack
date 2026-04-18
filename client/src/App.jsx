@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, PlusCircle, MinusCircle, PackageSearch, Users, LogOut, User as UserIcon, List, History } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, MinusCircle, PackageSearch, Users, LogOut, User as UserIcon, List, History, Settings2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import axios from 'axios';
 
@@ -12,6 +12,7 @@ import UserManagement from './pages/UserManagement';
 import AuditLogs from './pages/AuditLogs';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
+import ColumnSettings from './pages/ColumnSettings';
 
 const API_BASE_URL = '/api';
 
@@ -86,6 +87,11 @@ function App() {
                 <Users size={20} /> Users
               </Link>
             )}
+            {user.role === 'ADMIN' && (
+              <Link to="/settings/columns" className={location.pathname === '/settings/columns' ? 'active' : ''}>
+                <Settings2 size={20} /> Columns
+              </Link>
+            )}
             <Link to="/audit" className={location.pathname === '/audit' ? 'active' : ''}>
               <History size={20} /> Audit
             </Link>
@@ -111,6 +117,9 @@ function App() {
             <Route path="/check-out" element={<PageWrapper><CheckOut /></PageWrapper>} />
             {user?.role === 'ADMIN' && (
               <Route path="/users" element={<PageWrapper><UserManagement currentUser={user} /></PageWrapper>} />
+            )}
+            {user?.role === 'ADMIN' && (
+              <Route path="/settings/columns" element={<PageWrapper><ColumnSettings /></PageWrapper>} />
             )}
             <Route path="/audit" element={<PageWrapper><AuditLogs /></PageWrapper>} />
             <Route path="/profile" element={<PageWrapper><Profile user={user} /></PageWrapper>} />

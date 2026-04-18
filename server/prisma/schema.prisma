@@ -18,6 +18,7 @@ model Item {
   rackNumber    String?
   rackRowNumber String?
   minQuantity   Int      @default(5)
+  customData    Json     @default("{}")
   updatedAt     DateTime @updatedAt
   createdAt     DateTime @default(now())
 
@@ -36,7 +37,15 @@ model Transaction {
   itemPartNumber String?  // Snapshot for audit persistence
   username       String?  // Snapshot for audit persistence
   note           String?
+  customData     Json?    @default("{}")
   createdAt      DateTime @default(now())
+}
+
+model CustomColumn {
+  id         String   @id @default(uuid())
+  name       String   @unique
+  visibility String   @default("ALL") // "ADMIN" or "ALL"
+  createdAt  DateTime @default(now())
 }
 
 model User {

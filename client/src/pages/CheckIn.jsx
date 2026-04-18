@@ -40,6 +40,20 @@ const CheckIn = () => {
   const [mapping, setMapping] = useState({});    // { field: headerIndex }
   const [mappedData, setMappedData] = useState([]); // Array of objects ready for import
   const [errors, setErrors] = useState([]);
+  const [customCols, setCustomCols] = useState([]);
+
+  useEffect(() => {
+    fetchCustomCols();
+  }, []);
+
+  const fetchCustomCols = async () => {
+    try {
+      const res = await axios.get('/api/custom-columns');
+      setCustomCols(res.data);
+    } catch (err) {
+      console.error('Failed to fetch custom columns');
+    }
+  };
 
   // --- Manual Logic ---
   const handleManualSubmit = async (e) => {
@@ -93,7 +107,9 @@ const CheckIn = () => {
     
     // Auto-mapping logic
     const initialMapping = {};
-    ALL_FIELDS.forEach(field => {
+    const ALL_FIELDS_DYNAMIC = [...ALL_FIELDS, ...customCols.map(c => c.name)];
+    
+    ALL_FIELDS_DYNAMIC.forEach(field => {
       const index = fileHeaders.findIndex(h => 
         h?.toLowerCase().includes(field.toLowerCase()) ||
         (field === 'partNumber' && h?.toLowerCase().includes('sku'))
@@ -113,6 +129,14 @@ const CheckIn = () => {
           const colIdx = mapping[field];
           obj[field] = colIdx !== undefined ? row[colIdx] : '';
         });
+        
+        // Custom Data
+        obj.customData = {};
+        customCols.forEach(col => {
+          const colIdx = mapping[col.name];
+          if (colIdx !== undefined) obj.customData[col.name] = row[colIdx];
+        });
+
         obj._rowId = index;
         return obj;
       });
@@ -126,7 +150,7 @@ const CheckIn = () => {
       setMappedData(mapped);
       setErrors(errs);
     }
-  }, [step, fileData, mapping]);
+  }, [step, fileData, mapping, customCols]);
 
   const handleFinalImport = async () => {
     if (errors.length > 0) return;
@@ -224,6 +248,28 @@ const CheckIn = () => {
                 </div>
               </div>
 
+              {customCols.length > 0 && (
+                <div className="custom-fields-section">
+                  <h4 className="section-title">Custom Fields</h4>
+                  <div className="form-row">
+                    {customCols.map(col => (
+                      <div className="form-group" key={col.id}>
+                        <label>{col.name}</label>
+                        <input 
+                          type="text" 
+                          className="input-field" 
+                          value={formData.customData?.[col.name] || ''} 
+                          onChange={e => setFormData({
+                            ...formData, 
+                            customData: { ...(formData.customData || {}), [col.name]: e.target.value }
+                          })} 
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="form-group">
                 <label>Description (Optional)</label>
                 <textarea className="input-field textarea" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
@@ -282,6 +328,20 @@ const CheckIn = () => {
                      </select>
                    </div>
                  ))}
+                 {customCols.map(col => (
+                   <div key={col.id} className="mapping-item">
+                     <div className="field-info">
+                       <span className="field-name">{col.name.toUpperCase()}</span>
+                     </div>
+                     <select 
+                       value={mapping[col.name] ?? ''} 
+                       onChange={(e) => setMapping({...mapping, [col.name]: e.target.value === '' ? undefined : parseInt(e.target.value)})}
+                     >
+                       <option value="">-- Ignore --</option>
+                       {headers.map((h, i) => <option key={i} value={i}>{h || `Col ${i+1}`}</option>)}
+                     </select>
+                   </div>
+                 ))}
                </div>
                <div className="actions">
                  <button className="btn-secondary" onClick={() => setStep(STEPS.UPLOAD)}>Cancel</button>
@@ -316,6 +376,7 @@ const CheckIn = () => {
                      <tr>
                        {REQUIRED_FIELDS.map(f => <th key={f}>{f.toUpperCase()} *</th>)}
                        {OPTIONAL_FIELDS.slice(0, 3).map(f => <th key={f}>{f.toUpperCase()}</th>)}
+                       {customCols.map(col => <th key={col.id}>{col.name.toUpperCase()}</th>)}
                      </tr>
                    </thead>
                    <tbody>
@@ -328,6 +389,9 @@ const CheckIn = () => {
                           <td>{row.partNumber}</td>
                           <td>{row.make}</td>
                           <td>{row.model}</td>
+                          {customCols.map(col => (
+                            <td key={col.id}>{row.customData?.[col.name] || '-'}</td>
+                          ))}
                         </tr>
                        )
                      })}
@@ -432,6 +496,9 @@ const CheckIn = () => {
           from { transform: translateY(20px); opacity: 0; }
           to { transform: translateY(0); opacity: 1; }
         }
+
+        .custom-fields-section { margin-top: 2rem; border-top: 1px solid var(--glass-border); padding-top: 1.5rem; }
+        .section-title { font-size: 0.8rem; font-weight: 700; color: var(--primary); margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 0.1em; }
       `}} />
     </div>
   );
